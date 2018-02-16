@@ -1,7 +1,26 @@
 describe('function-proto', () => {
-    const { FunctionInvokerService, FunctionInvokerClient, MessageBuilder, MessageHeaders } = require('..');
+    const {
+        FunctionInvokerClient,
+        FunctionInvokerService,
+        LivenessClient,
+        LivenessService,
+        ReadinessClient,
+        ReadinessService,
+        MessageBuilder,
+        MessageHeaders
+    } = require('..');
     const grpc = require('grpc');
-    const port = 50051;
+    let port = 50051;
+
+    function makeGRPCClientAndServer(Client, Service, ServiceImpl) {
+        const p = port++;
+        const server = new grpc.Server();
+        server.addService(Service, ServiceImpl);
+        server.bind(`127.0.0.1:${p}`, grpc.ServerCredentials.createInsecure());
+        server.start();
+        const client = new Client(`127.0.0.1:${p}`, grpc.credentials.createInsecure());
+        return { client, server };
+    }
 
     describe('MessageHeaders', () => {
         it('parses a plain JS object', () => {
@@ -95,67 +114,97 @@ describe('function-proto', () => {
         });
     });
 
-    it('builds a message', () => {
-        const theMessage = new MessageBuilder()
-            .addHeader('Header-Name', 'headerValue 1')
-            .addHeader('Header-Name', 'headerValue 2')
-            .payload('will be replaced')
-            .payload('riff')
-            .build();
+    describe('MessageBuilder', () => {
+        it('builds a message', () => {
+            const theMessage = new MessageBuilder()
+                .addHeader('Header-Name', 'headerValue 1')
+                .addHeader('Header-Name', 'headerValue 2')
+                .payload('will be replaced')
+                .payload('riff')
+                .build();
 
-        expect(theMessage).toEqual({
-            headers: {
-                'Header-Name': {
-                    values: [
-                        'headerValue 1',
-                        'headerValue 2'
-                    ]
+            expect(theMessage).toEqual({
+                headers: {
+                    'Header-Name': {
+                        values: [
+                            'headerValue 1',
+                            'headerValue 2'
+                        ]
+                    }
+                },
+                payload: Buffer.from('riff')
+            });
+        });
+
+        it('builds an empty message', () => {
+            const theMessage = new MessageBuilder().build();
+
+            expect(theMessage).toEqual({
+                headers: {},
+                payload: Buffer.from([])
+            });
+        });
+    });
+
+    describe('FunctionInvokerService', () => {
+        it('generates a grpc client and server', done => {
+            const theMessage = new MessageBuilder()
+                .addHeader('Header-Name', 'headerValue')
+                .payload('riff')
+                .build();
+
+            const { client, server } = makeGRPCClientAndServer(
+                FunctionInvokerClient,
+                FunctionInvokerService,
+                {
+                    call(call) {
+                        call.on('data', message => {
+                            expect(message).toEqual(theMessage);
+                            call.write(message);
+                        });
+                        call.on('end', () => {
+                            call.end();
+                        });
+                    }
                 }
-            },
-            payload: Buffer.from('riff')
+            );
+            const call = client.call();
+            call.on('data', message => {
+                expect(message).toEqual(theMessage);
+                call.end();
+            });
+            call.on('end', () => {
+                server.tryShutdown(done);
+            });
+            call.write(theMessage);
         });
     });
 
-    it('builds an empty message', () => {
-        const theMessage = new MessageBuilder().build();
+    describe('ProbeService', () => {
+        const probeServices = [
+            { name: 'Liveness', Client: LivenessClient, Service: LivenessService },
+            { name: 'Readiness', Client: ReadinessClient, Service: ReadinessService }
+        ];
 
-        expect(theMessage).toEqual({
-            headers: {},
-            payload: Buffer.from([])
-        });
-    });
+        probeServices.forEach(({ name, Client, Service }) => {
+            it(`generates a ${name} client and server`, done => {
+                const { client, server } = makeGRPCClientAndServer(
+                    Client,
+                    Service,
+                    {
+                        probe(call, callback) {
+                            callback(null, { healthy: true });
+                        }
+                    }
+                );
+                client.probe({}, (err, { healthy }) => {
+                    expect(err).toBeFalsy();
+                    expect(healthy).toBeTruthy();
 
-    it('generates a grpc client and server', done => {
-        const theMessage = new MessageBuilder()
-            .addHeader('Header-Name', 'headerValue')
-            .payload('riff')
-            .build();
-
-        const server = new grpc.Server();
-        server.addService(FunctionInvokerService, {
-            call(call) {
-                call.on('data', message => {
-                    expect(message).toEqual(theMessage);
-                    call.write(message);
+                    server.tryShutdown(done);
                 });
-                call.on('end', () => {
-                    call.end();
-                });
-            }
+            });
         });
-        server.bind(`127.0.0.1:${port}`, grpc.ServerCredentials.createInsecure());
-        server.start();
-
-        // client
-        const client = new FunctionInvokerClient(`127.0.0.1:${port}`, grpc.credentials.createInsecure());
-        const call = client.call();
-        call.on('data', message => {
-            expect(message).toEqual(theMessage);
-            call.end();
-        });
-        call.on('end', () => {
-            server.tryShutdown(done);
-        });
-        call.write(theMessage);
     });
+
 });

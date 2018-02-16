@@ -1,2 +1,2 @@
-function.proto
+*.proto
 node_modules

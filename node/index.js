@@ -18,6 +18,7 @@ const grpc = require('grpc');
 const path = require('path');
 
 const fn = grpc.load(path.resolve(__dirname, 'function.proto')).function;
+const healthz = grpc.load(path.resolve(__dirname, 'healthz.proto')).healthz;
 
 function cloneMap(src) {
     const dest = new Map();
@@ -115,9 +116,24 @@ MessageBuilder.prototype = {
     }
 };
 
+function checkProbe(Client, address) {
+    return new Promise((resolve, reject) => {
+        const client = new Client(address, grpc.credentials.createInsecure());
+        client.probe({}, (err, result) => {
+            if (err) return reject(err);
+            resolve(result.healthy);
+        });
+    });
+}
+
 module.exports = {
+    checkProbe,
     MessageBuilder,
     MessageHeaders,
+    FunctionInvokerClient: fn.MessageFunction,
     FunctionInvokerService: fn.MessageFunction.service,
-    FunctionInvokerClient: fn.MessageFunction
+    LivenessClient: healthz.Liveness,
+    LivenessService: healthz.Liveness.service,
+    ReadinessClient: healthz.Readiness,
+    ReadinessService: healthz.Readiness.service
 };

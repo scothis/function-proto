@@ -1,10 +1,14 @@
 {
   "name": "@projectriff/function-proto",
-  "version": "0.0.4-snapshot-3",
+  "version": "0.0.4-snapshot-5",
   "description": "gRPC service definitions used by the project riff function-sidecar",
   "main": "index.js",
+  "bin": {
+    "livenessProbe": "./bin/liveness.js",
+    "readinessProbe": "./bin/readiness.js"
+  },
   "scripts": {
-    "prepublish": "cp ../function.proto .",
+    "prepublish": "cp ../*.proto .",
     "test": "jasmine"
   },
   "repository": {
@@ -30,5 +34,8 @@
   "devDependencies": {
     "grpc": "^1.8.4",
     "jasmine": "^3.0.0"
+  },
+  "dependencies": {
+    "yargs": "^11.0.0"
   }
 }
